@@ -26,9 +26,11 @@ class Agent:
         obs: local observation for this agent
         timestep: current timestep
         """
+        # print(f"obs for agent {self.agent_id} at timestep {timestep}: {obs}")
         # Update self info
         self.health = obs[0]  # typically the first entry is health
-        self.position = tuple(obs[1:3])  # x, y
+        # self.position = tuple(obs[1:3])  # x, y
+        self.position = tuple(obs[-2:])  # x, y (last two entries)
         self.knowledge_graph.add_node(
             self.agent_id,
             health=self.health,
@@ -50,7 +52,10 @@ class Agent:
                 self.knowledge_graph.add_node(
                     node_id,
                     health=enemy_health,
-                    position=(enemy_x, enemy_y),
+                    position=(
+                        self.position[0] + enemy_x,
+                        self.position[1] + enemy_y,
+                    ),
                     last_seen=timestep,
                 )
                 # Optional: add edge showing it's visible
@@ -84,7 +89,7 @@ def main():
         for agent_id in range(n_agents)
     ]
 
-    n_episodes = 1
+    n_episodes = 5
 
     for e in range(n_episodes):
         env.reset()
