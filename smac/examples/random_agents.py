@@ -171,6 +171,49 @@ def pretty_print_kg(agent, timestep):
                 )
 
 
+def print_kg_summary(agent, header="Knowledge Graph Summary"):
+    """
+    Print a comprehensive summary of the agent's knowledge graph:
+    - List of entities (nodes) and their properties
+    - List of edges between entities with labels
+    This is intended for a one-off sanity check.
+    """
+    G = agent.knowledge_graph
+    print("\n" + "=" * 40)
+    print(f"{header} for Agent {agent.agent_id}")
+    print("=" * 40)
+
+    # Entities
+    print("\nEntities:")
+    for n, attrs in G.nodes(data=True):
+        # Show node id and properties
+        prop_strings = []
+        for k, v in attrs.items():
+            try:
+                prop_strings.append(
+                    f"{k}={float(v):.6f}"
+                    if isinstance(v, (int, float, np.floating, np.integer))
+                    else f"{k}={v}"
+                )
+            except Exception:
+                prop_strings.append(f"{k}={v}")
+        print(f" - {n}: {', '.join(prop_strings)}")
+
+    # Edges
+    print("\nEdges:")
+    for u, v, attrs in G.edges(data=True):
+        label = attrs.get("relation", attrs)
+        print(f" - {u} -> {v} [label={label}]")
+
+    print("\nProperties by entity (detailed):")
+    for n in G.nodes():
+        print(f"\n# {n}")
+        attrs = G.nodes[n]
+        for k, v in attrs.items():
+            print(f" {k}: {v}")
+    print("\n" + "=" * 40 + "\n")
+
+
 def main():
     map_name = MAP_NAME
 
@@ -228,6 +271,11 @@ def main():
 
             state = env.get_state()
             # env.render()  # Uncomment for rendering
+
+            if timestep == 8: # 8 is an arbitrary timestep to print the KG summary. We only need it once.
+                print_kg_summary(
+                    agents[0], header=f"Episode {e} Timestep {timestep}"
+                )
 
             actions = []
             for agent_id in range(n_agents):
