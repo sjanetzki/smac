@@ -953,20 +953,14 @@ class StarCraft2Env(MultiAgentEnv):
         - ally features (visible, distance, relative_x, relative_y, shield,
             unit_type)
         - agent unit features (health, shield, unit_type)
+        - agent absolute position (x, y coordinates)
 
         All of this information is flattened and concatenated into a list,
         in the aforementioned order. To know the sizes of each of the
         features inside the final list of features, take a look at the
         functions ``get_obs_move_feats_size()``,
-        ``get_obs_enemy_feats_size()``, ``get_obs_ally_feats_size()`` and
-        ``get_obs_own_feats_size()``.
-
-        The size of the observation vector may vary, depending on the
-        environment configuration and type of units present in the map.
-        For instance, non-Protoss units will not have shields, movement
-        features may or may not include terrain height and pathing grid,
-        unit_type is not included if there is only one type of unit in the
-        map etc.).
+        ``get_obs_enemy_feats_size()``, ``get_obs_ally_feats_size()``,
+        ``get_obs_own_feats_size()`` and ``get_obs_own_pos_size()``.
 
         NOTE: Agents should have access only to their local observations
         during decentralised execution.
@@ -977,16 +971,22 @@ class StarCraft2Env(MultiAgentEnv):
         enemy_feats_dim = self.get_obs_enemy_feats_size()
         ally_feats_dim = self.get_obs_ally_feats_size()
         own_feats_dim = self.get_obs_own_feats_size()
+        own_pos_dim = 2  # x, y coordinates
 
         move_feats = np.zeros(move_feats_dim, dtype=np.float32)
         enemy_feats = np.zeros(enemy_feats_dim, dtype=np.float32)
         ally_feats = np.zeros(ally_feats_dim, dtype=np.float32)
         own_feats = np.zeros(own_feats_dim, dtype=np.float32)
+        own_pos = np.zeros(own_pos_dim, dtype=np.float32)
 
         if unit.health > 0:  # otherwise dead, return all zeros
-            x = unit.pos.x
-            y = unit.pos.y
+            x = unit.pos.x  # absolute x position of the unit
+            y = unit.pos.y  # absolute y position of the unit
             sight_range = self.unit_sight_range(agent_id)
+
+            # Agent absolute position
+            own_pos[0] = x
+            own_pos[1] = y
 
             # Movement features
             avail_actions = self.get_avail_agent_actions(agent_id)
@@ -996,9 +996,9 @@ class StarCraft2Env(MultiAgentEnv):
             ind = self.n_actions_move
 
             if self.obs_pathing_grid:
-                move_feats[
-                    ind : ind + self.n_obs_pathing  # noqa
-                ] = self.get_surrounding_pathing(unit)
+                move_feats[ind : ind + self.n_obs_pathing] = (  # noqa
+                    self.get_surrounding_pathing(unit)
+                )
                 ind += self.n_obs_pathing
 
             if self.obs_terrain_height:
@@ -1102,6 +1102,7 @@ class StarCraft2Env(MultiAgentEnv):
                 enemy_feats.flatten(),
                 ally_feats.flatten(),
                 own_feats.flatten(),
+                own_pos.flatten(),
             )
         )
 
@@ -1121,7 +1122,9 @@ class StarCraft2Env(MultiAgentEnv):
             logging.debug("Enemy feats {}".format(enemy_feats))
             logging.debug("Ally feats {}".format(ally_feats))
             logging.debug("Own feats {}".format(own_feats))
+            logging.debug("Own pos {}".format(own_pos))
 
+        # print(f"own feats: {own_feats}")
         return agent_obs
 
     def get_obs(self):

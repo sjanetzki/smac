@@ -3,10 +3,16 @@ from __future__ import division
 from __future__ import print_function
 
 from smac.env import StarCraft2Env
+from smac.env.starcraft2.maps import smac_maps
+from pysc2 import maps as pysc2_maps
+
 import numpy as np
 import networkx as nx
 
-START_ENEMY_INFO_IDX = 5  # Index in observation where enemy info starts. The previous entries are usually self info.
+START_ENEMY_INFO_IDX = 5  # index in obs where enemy info starts
+MAP_NAME = "3m"  # 8m, 2m_vs_1z, 3m
+MAX_ENEMIES = 64  # largest number of enemies that appear in SMAC maps
+N_EPISODES = 1
 
 class Agent:
     def __init__(
@@ -18,17 +24,25 @@ class Agent:
         self.position = position
         self.alive = alive
         self.visible = visible
-        self.knowledge_graph = nx.DiGraph()  # Step 1: simple empty graph
+        self.knowledge_graph = nx.DiGraph()
 
-    def log_observation(self, obs, timestep, env, max_enemies=8):
-        
+    def log_observation(self, obs, timestep, env_info, env, map_name=None):
         """
-        obs: local observation for this agent
-        timestep: current timestep
+        Parse a single-agent observation and update the agent's knowledge graph.
+
+        obs: 1D numpy array (agent-local observation)
+        timestep: int
+        env_info: dict from env.get_env_info()
+        map_name: optional name of the map so we can pick n_enemies from SMAC registry
         """
-        # Update self info
-        self.health = obs[0]  # typically the first entry is health
-        self.position = tuple(obs[1:3])  # x, y
+        # update self info from the tail of the observation (common SMAC layout)
+        try:
+            self.health = float(obs[-3])
+            self.position = (float(obs[-2]), float(obs[-1]))
+        except Exception:
+            pass
+
+        # agent information
         self.knowledge_graph.add_node(
             self.agent_id,
             health=self.health,
@@ -46,7 +60,7 @@ class Agent:
             
             if enemy_health > 0:  # Enemy is visible/alive
                 tag = int(enemy_unit.tag)  # globale ID
-                node_id = ('enemy', tag)  # robustere ID
+                node_id = ('Enemy', tag)  # robustere ID
                 self.knowledge_graph.add_node(
                     node_id,
                     health=enemy_health,
@@ -59,34 +73,138 @@ class Agent:
                 self.knowledge_graph.add_edge(
                     self.agent_id, node_id, relation="visible"
                 )
-
+        
 
 def pretty_print_kg(agent, timestep):
-    print(f"\nAgent {agent.agent_id} Knowledge at timestep {timestep}:")
-    for node, attrs in agent.knowledge_graph.nodes(data=True):
-        # convert np.float32 to float for readability
+    """
+    Print knowledge graph grouped by agent nodes.
+
+    - Only print agents (agent nodes are assumed to be the agent_id used when adding the agent node;
+      in the current code they are integers like 0,1,2,...).
+    - If an agent's health <= 0, skip printing that agent and its seen enemies.
+    - Enemies are printed only as children/successors of the agent that sees them.
+    """
+    G = agent.knowledge_graph
+
+    # find agent nodes: we assume the agent nodes are the numeric ids (int)
+    agent_nodes = [n for n in G.nodes() if isinstance(n, int)]
+
+    for a_node in sorted(agent_nodes):
+        attrs = G.nodes[a_node]
         health = float(attrs.get("health", -1))
-        pos = tuple(float(p) for p in attrs.get("position", (0, 0)))
+        pos = tuple(float(p) for p in attrs.get("position", (0.0, 0.0)))
         last_seen = attrs.get("last_seen", -1)
+
+        if health <= 0:
+            print(f"Agent {a_node} is dead or not visible.")
+            continue
+
+        # Print the agent header
         print(
-            f"  {node}: Health={health:.3f}, Pos={pos}, LastSeen={last_seen}"
+            f"Agent {a_node}: Health={health:.3f}, Pos={pos}, LastSeen={last_seen}"
         )
 
+        # Print enemies that this agent has an edge to (i.e. visible enemies)
+        for succ in G.successors(a_node):
+            if not isinstance(succ, str) or not succ.startswith("Enemy"):
+                continue
+
+            e_attrs = G.nodes[succ]
+            e_health = float(e_attrs.get("health", -1))
+            e_pos = tuple(
+                float(p) for p in e_attrs.get("position", (0.0, 0.0))
+            )
+            e_last_seen = e_attrs.get("last_seen", -1)
+
+            # Only print enemy info if enemy_health > 0 (visible)
+            if e_health > 0:
+                print(
+                    f"  {succ}: Health={e_health:.3f}, Pos={e_pos}, LastSeen={e_last_seen}"
+                )
+
+
+def print_kg_summary(agent, header="Knowledge Graph Summary"):
+    """
+    Print a comprehensive summary of the agent's knowledge graph:
+    - List of entities (nodes) and their properties
+    - List of edges between entities with labels
+    This is intended for a one-off sanity check.
+    """
+    G = agent.knowledge_graph
+    print("\n" + "=" * 40)
+    print(f"{header} for Agent {agent.agent_id}")
+    print("=" * 40)
+
+    # Entities
+    print("\nEntities:")
+    for n, attrs in G.nodes(data=True):
+        # Show node id and properties
+        prop_strings = []
+        for k, v in attrs.items():
+            try:
+                prop_strings.append(
+                    f"{k}={float(v):.6f}"
+                    if isinstance(v, (int, float, np.floating, np.integer))
+                    else f"{k}={v}"
+                )
+            except Exception:
+                prop_strings.append(f"{k}={v}")
+        print(f" - {n}: {', '.join(prop_strings)}")
+
+    # Edges
+    print("\nEdges:")
+    for u, v, attrs in G.edges(data=True):
+        label = attrs.get("relation", attrs)
+        print(f" - {u} -> {v} [label={label}]")
+
+    print("\nProperties by entity (detailed):")
+    for n in G.nodes():
+        print(f"\n# {n}")
+        attrs = G.nodes[n]
+        for k, v in attrs.items():
+            print(f" {k}: {v}")
+    print("\n" + "=" * 40 + "\n")
+
+
 def main():
-    env = StarCraft2Env(map_name="8m")
+    map_name = MAP_NAME
+
+    smac_map_registry = smac_maps.get_smac_map_registry()
+    all_maps = pysc2_maps.get_maps()
+
+    if map_name in smac_map_registry and map_name in all_maps:
+        print(
+            f"Map '{map_name}' found in registry; using n_enemies={smac_map_registry[map_name]['n_enemies']}"
+        )
+    else:
+        print(
+            f"Map '{map_name}' not found in registry or pysc2 maps; falling back to obs-derived heuristic"
+        )
+
+    env = StarCraft2Env(map_name=map_name)
     env_info = env.get_env_info()
+    print("env info: ", env_info)
 
     n_actions = env_info["n_actions"]
     n_agents = env_info["n_agents"]
 
-    # Initialize agents
+    # If SMAC registry has the map, use that n_enemies; otherwise fallback to heuristic value
+    computed_max_enemies = None
+    if map_name in smac_map_registry:
+        computed_max_enemies = smac_map_registry[map_name]["n_enemies"]
+    else:
+        computed_max_enemies = MAX_ENEMIES
+
+    print(f"Using max_enemies = {computed_max_enemies} (map: {map_name})")
+
     agents = [
-        Agent(agent_id, f"Agent{agent_id}", 100, (0, 0))
+        Agent(
+            agent_id, f"Agent{agent_id}", 100, (0, 0)
+        )  # the 100 is the initial health and the (0,0) is the initial position
         for agent_id in range(n_agents)
     ]
 
-    n_episodes = 1
-
+    n_episodes = N_EPISODES
     for e in range(n_episodes):
         env.reset()
         terminated = False
@@ -94,15 +212,22 @@ def main():
 
         timestep = 0
         while not terminated:
-            obs = env.get_obs()
+            obs = env.get_obs()  # list of per-agent observations
             for agent_id, agent_obs in enumerate(obs):
-                agents[agent_id].log_observation(agent_obs, timestep, env)
+                agents[agent_id].log_observation(
+                    agent_obs, timestep, env_info, env, map_name=map_name
+                )
                 pretty_print_kg(agents[agent_id], timestep)
-                
+
             timestep += 1
 
             state = env.get_state()
             # env.render()  # Uncomment for rendering
+
+            if timestep == 8: # 8 is an arbitrary timestep to print the KG summary. We only need it once.
+                print_kg_summary(
+                    agents[0], header=f"Episode {e} Timestep {timestep}"
+                )
 
             actions = []
             for agent_id in range(n_agents):
