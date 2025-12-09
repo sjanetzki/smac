@@ -1,3 +1,7 @@
+# python -m smac.examples.random_agents zum ausführen 
+# multiagentenv.py hat funktionalitäten die wir implementieren müssen 
+
+
 <p align="center">
  <img width="95%" src="docs/smac-official.png" />
 </p>
