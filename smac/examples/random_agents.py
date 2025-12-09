@@ -72,7 +72,6 @@ def pretty_print_kg(agent, timestep):
             f"  {node}: Health={health:.3f}, Pos={pos}, LastSeen={last_seen}"
         )
 
-
 def main():
     env = StarCraft2Env(map_name="8m")
     env_info = env.get_env_info()
@@ -99,6 +98,7 @@ def main():
             for agent_id, agent_obs in enumerate(obs):
                 agents[agent_id].log_observation(agent_obs, timestep, env)
                 pretty_print_kg(agents[agent_id], timestep)
+                
             timestep += 1
 
             state = env.get_state()
