@@ -10,9 +10,9 @@ import numpy as np
 import networkx as nx
 
 START_ENEMY_INFO_IDX = 5  # index in obs where enemy info starts
-MAP_NAME = "3m"  # 8m, 2m_vs_1z, 3m
-MAX_ENEMIES = 64  # largest number of enemies that appear in SMAC maps
+MAP_NAME = "8m"  # 8m, 2m_vs_1z, 3m
 N_EPISODES = 1
+
 
 class Agent:
     def __init__(
@@ -57,10 +57,10 @@ class Agent:
             enemy_health = obs[START_ENEMY_INFO_IDX + e_id * 3]
             enemy_x = obs[START_ENEMY_INFO_IDX + e_id * 3 + 1]
             enemy_y = obs[START_ENEMY_INFO_IDX + e_id * 3 + 2]
-            
+
             if enemy_health > 0:  # Enemy is visible/alive
                 tag = int(enemy_unit.tag)  # globale ID
-                node_id = ('Enemy', tag)  # robustere ID
+                node_id = ("Enemy", tag)  # robustere ID
                 self.knowledge_graph.add_node(
                     node_id,
                     health=enemy_health,
@@ -73,54 +73,55 @@ class Agent:
                 self.knowledge_graph.add_edge(
                     self.agent_id, node_id, relation="visible"
                 )
-        
 
-def pretty_print_kg(agent, timestep):
-    """
-    Print knowledge graph grouped by agent nodes.
 
-    - Only print agents (agent nodes are assumed to be the agent_id used when adding the agent node;
-      in the current code they are integers like 0,1,2,...).
-    - If an agent's health <= 0, skip printing that agent and its seen enemies.
-    - Enemies are printed only as children/successors of the agent that sees them.
-    """
+def pretty_print_kg(agent, timestep, show_header=True):
     G = agent.knowledge_graph
 
-    # find agent nodes: we assume the agent nodes are the numeric ids (int)
-    agent_nodes = [n for n in G.nodes() if isinstance(n, int)]
+    # print the header for the first agent only
+    if show_header and agent.agent_id == 0:
+        print("\n" + "─" * 27 + f"  t = {timestep:>3}  " + "─" * 27)
 
-    for a_node in sorted(agent_nodes):
+    agent_nodes = sorted(n for n in G.nodes() if isinstance(n, int))
+
+    for a_node in agent_nodes:
         attrs = G.nodes[a_node]
         health = float(attrs.get("health", -1))
-        pos = tuple(float(p) for p in attrs.get("position", (0.0, 0.0)))
+        pos = attrs.get("position", (0.0, 0.0))
         last_seen = attrs.get("last_seen", -1)
 
         if health <= 0:
-            print(f"Agent {a_node} is dead or not visible.")
+            print(f"\n Agent {a_node} is dead or not visible")
             continue
 
-        # Print the agent header
-        print(
-            f"Agent {a_node}: Health={health:.3f}, Pos={pos}, LastSeen={last_seen}"
-        )
+        print(f"\n Agent {a_node}")
+        print(f"   Health    : {health:.3f}")
+        print(f"   Absolute Position  : ({pos[0]:.3f}, {pos[1]:.3f})")
 
-        # Print enemies that this agent has an edge to (i.e. visible enemies)
+        enemies = []
         for succ in G.successors(a_node):
-            if not isinstance(succ, str) or not succ.startswith("Enemy"):
-                continue
+            if isinstance(succ, tuple) and succ[0] == "Enemy":
+                enemies.append(succ)
 
+        print(f"\n Seen Enemies ({len(enemies)})")
+
+        for i, succ in enumerate(enemies):
             e_attrs = G.nodes[succ]
             e_health = float(e_attrs.get("health", -1))
-            e_pos = tuple(
-                float(p) for p in e_attrs.get("position", (0.0, 0.0))
-            )
-            e_last_seen = e_attrs.get("last_seen", -1)
 
-            # Only print enemy info if enemy_health > 0 (visible)
-            if e_health > 0:
-                print(
-                    f"  {succ}: Health={e_health:.3f}, Pos={e_pos}, LastSeen={e_last_seen}"
-                )
+            rel = e_attrs.get("position", (0.0, 0.0))
+            abs_pos = (pos[0] + rel[0], pos[1] + rel[1])
+            tag = succ[1]
+
+            branch = "└─" if i == len(enemies) - 1 else "├─"
+
+            print(
+                f"     {branch} Enemy#{tag} "
+                f"health:{e_health:.3f}  "
+                f"relative position:({rel[0]:.3f}, {rel[1]:.3f})  "
+                # f"abs pos:({abs_pos[0]:.3f}, {abs_pos[1]:.3f})"
+                f"last seen:{e_attrs.get('last_seen', -1)}"
+            )
 
 
 def print_kg_summary(agent, header="Knowledge Graph Summary"):
@@ -188,15 +189,6 @@ def main():
     n_actions = env_info["n_actions"]
     n_agents = env_info["n_agents"]
 
-    # If SMAC registry has the map, use that n_enemies; otherwise fallback to heuristic value
-    computed_max_enemies = None
-    if map_name in smac_map_registry:
-        computed_max_enemies = smac_map_registry[map_name]["n_enemies"]
-    else:
-        computed_max_enemies = MAX_ENEMIES
-
-    print(f"Using max_enemies = {computed_max_enemies} (map: {map_name})")
-
     agents = [
         Agent(
             agent_id, f"Agent{agent_id}", 100, (0, 0)
@@ -224,7 +216,9 @@ def main():
             state = env.get_state()
             # env.render()  # Uncomment for rendering
 
-            if timestep == 8: # 8 is an arbitrary timestep to print the KG summary. We only need it once.
+            if (
+                timestep == 8
+            ):  # 8 is an arbitrary timestep to print the KG summary. We only need it once.
                 print_kg_summary(
                     agents[0], header=f"Episode {e} Timestep {timestep}"
                 )
