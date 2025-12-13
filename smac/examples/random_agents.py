@@ -10,8 +10,9 @@ import numpy as np
 import networkx as nx
 
 START_ENEMY_INFO_IDX = 5  # index in obs where enemy info starts
-MAP_NAME = "8m"  # 8m, 2m_vs_1z, 3m
+MAP_NAME = "3m"  # 8m, 2m_vs_1z, 3m
 N_EPISODES = 1
+SIGHT_RANGE = 9.0  # assumed sight range for all units
 
 
 class Agent:
@@ -59,14 +60,14 @@ class Agent:
             enemy_y = obs[START_ENEMY_INFO_IDX + e_id * 3 + 2]
 
             if enemy_health > 0:  # Enemy is visible/alive
-                tag = int(enemy_unit.tag)  # globale ID
-                node_id = ("Enemy", tag)  # robustere ID
+                tag = int(enemy_unit.tag)  # global ID
+                node_id = ("Enemy", tag)  # more robust ID
                 self.knowledge_graph.add_node(
                     node_id,
                     health=enemy_health,
                     position=(enemy_x, enemy_y),
                     last_seen=timestep,
-                    e_id=e_id,  # speichere auch lokalen Index
+                    e_id=e_id,  # also save the local enemy index
                     tag=tag,
                 )
                 # Optional: add edge showing it's visible
@@ -97,6 +98,7 @@ def pretty_print_kg(agent, timestep, show_header=True):
         print(f"\n Agent {a_node}")
         print(f"   Health    : {health:.3f}")
         print(f"   Absolute Position  : ({pos[0]:.3f}, {pos[1]:.3f})")
+        # print(f"   Sight Range : {attrs.get('sight_range', -1):.3f}")
 
         enemies = []
         for succ in G.successors(a_node):
@@ -110,7 +112,10 @@ def pretty_print_kg(agent, timestep, show_header=True):
             e_health = float(e_attrs.get("health", -1))
 
             rel = e_attrs.get("position", (0.0, 0.0))
-            abs_pos = (pos[0] + rel[0], pos[1] + rel[1])
+            abs_pos = (
+                pos[0] + rel[0] * SIGHT_RANGE,
+                pos[1] + rel[1] * SIGHT_RANGE,
+            )  # relative position is calculated as follows:  (enemey_x - unit_x) / sight_range, (enemy_y - unit_y) / sight_range
             tag = succ[1]
 
             branch = "└─" if i == len(enemies) - 1 else "├─"
@@ -119,7 +124,7 @@ def pretty_print_kg(agent, timestep, show_header=True):
                 f"     {branch} Enemy#{tag} "
                 f"health:{e_health:.3f}  "
                 f"relative position:({rel[0]:.3f}, {rel[1]:.3f})  "
-                # f"abs pos:({abs_pos[0]:.3f}, {abs_pos[1]:.3f})"
+                f"abosolute position:({abs_pos[0]:.3f}, {abs_pos[1]:.3f}) "
                 f"last seen:{e_attrs.get('last_seen', -1)}"
             )
 
